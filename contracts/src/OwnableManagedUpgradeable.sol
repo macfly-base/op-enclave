@@ -65,7 +65,7 @@ abstract contract OwnableManagedUpgradeable is Initializable, ContextUpgradeable
     }
 
     /**
-     * @dev Throws if the sender is not the owner.
+     * @dev Throws if the sender is not the manager.
      */
     function _checkManager() internal view virtual {
         require(manager() == _msgSender(), "OwnableManaged: caller is not the manager");
