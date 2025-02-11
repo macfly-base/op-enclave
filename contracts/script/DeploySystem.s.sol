@@ -281,11 +281,7 @@ contract DeploySystem is Deploy {
             _proxy: payable(systemConfigGlobalProxy),
             _implementation: systemConfigGlobal,
             _innerCallData: abi.encodeCall(
-                SystemConfigGlobal.initialize,
-                (
-                    cfg.finalSystemOwner(),
-                    systemConfigGlobalManager
-                )
+                SystemConfigGlobal.initialize, (cfg.finalSystemOwner(), systemConfigGlobalManager)
             )
         });
 
