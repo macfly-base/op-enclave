@@ -18,7 +18,7 @@ contract OutputOracleTest is Test {
         SystemConfigGlobal scgImpl = new SystemConfigGlobal(ICertManager(address(0)));
         SystemConfigGlobal scg =
             SystemConfigGlobal(ResolvingProxyFactory.setupProxy(address(scgImpl), address(admin), 0x00));
-        scg.initialize({_owner: address(this)});
+        scg.initialize({_owner: address(this), _manager: address(this)});
         scg.setProposer(address(this));
         OutputOracle outputOracleImpl = new OutputOracle({_systemConfigGlobal: scg, _maxOutputCount: 6});
         outputOracle = OutputOracle(ResolvingProxyFactory.setupProxy(address(outputOracleImpl), address(admin), 0x00));

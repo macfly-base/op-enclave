@@ -2,14 +2,14 @@
 
 pragma solidity ^0.8.0;
 
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {OwnableManagedUpgradeable} from "./OwnableManagedUpgradeable.sol";
 import {ISemver} from "@eth-optimism-bedrock/src/universal/interfaces/ISemver.sol";
 import {NitroValidator} from "@nitro-validator/NitroValidator.sol";
 import {LibBytes} from "@nitro-validator/LibBytes.sol";
 import {LibCborElement, CborElement, CborDecode} from "@nitro-validator/CborDecode.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
 
-contract SystemConfigGlobal is OwnableUpgradeable, ISemver, NitroValidator {
+contract SystemConfigGlobal is OwnableManagedUpgradeable, ISemver, NitroValidator {
     using LibBytes for bytes;
     using CborDecode for bytes;
     using LibCborElement for CborElement;
@@ -32,11 +32,13 @@ contract SystemConfigGlobal is OwnableUpgradeable, ISemver, NitroValidator {
     }
 
     constructor(ICertManager certManager) NitroValidator(certManager) {
-        initialize({_owner: address(0xdEaD)});
+        initialize({_owner: address(0xdEaD), _manager: address(0xdEaD)});
     }
 
-    function initialize(address _owner) public initializer {
-        __Ownable_init();
+    function initialize(address _owner, address _manager) public initializer {
+        __OwnableManaged_init();
+        // transferManagement is onlyOwner and must be called prior to transferOwnership
+        transferManagement(_manager);
         transferOwnership(_owner);
     }
 
@@ -52,7 +54,7 @@ contract SystemConfigGlobal is OwnableUpgradeable, ISemver, NitroValidator {
         delete validPCR0s[keccak256(pcr0)];
     }
 
-    function registerSigner(bytes calldata attestationTbs, bytes calldata signature) external onlyOwner {
+    function registerSigner(bytes calldata attestationTbs, bytes calldata signature) external onlyManager {
         Ptrs memory ptrs = validateAttestation(attestationTbs, signature);
         bytes32 pcr0 = attestationTbs.keccak(ptrs.pcrs[0]);
         require(validPCR0s[pcr0], "invalid pcr0 in attestation");
@@ -66,7 +68,7 @@ contract SystemConfigGlobal is OwnableUpgradeable, ISemver, NitroValidator {
         validSigners[enclaveAddress] = true;
     }
 
-    function deregisterSigner(address signer) external onlyOwner {
+    function deregisterSigner(address signer) external onlyManager {
         delete validSigners[signer];
     }
 }

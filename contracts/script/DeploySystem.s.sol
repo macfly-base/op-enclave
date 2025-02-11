@@ -3,6 +3,7 @@ pragma solidity ^0.8.15;
 
 import {Deploy} from "@eth-optimism-bedrock/scripts/deploy/Deploy.s.sol";
 import {DeployConfig} from "@eth-optimism-bedrock/scripts/deploy/DeployConfig.s.sol";
+import {Config} from "@eth-optimism-bedrock/scripts/libraries/Config.sol";
 import {Types} from "@eth-optimism-bedrock/scripts/libraries/Types.sol";
 import {ChainAssertions} from "@eth-optimism-bedrock/scripts/deploy/ChainAssertions.sol";
 import {SystemConfig} from "@eth-optimism-bedrock/src/L1/SystemConfig.sol";
@@ -23,6 +24,7 @@ import {ResourceMetering} from "@eth-optimism-bedrock/src/L1/ResourceMetering.so
 import {IResourceMetering} from "@eth-optimism-bedrock/src/L1/interfaces/IResourceMetering.sol";
 import {ICertManager} from "@nitro-validator/ICertManager.sol";
 
+import {stdJson} from "forge-std/StdJson.sol";
 import {console2 as console} from "forge-std/console2.sol";
 
 contract DeploySystem is Deploy {
@@ -266,10 +268,25 @@ contract DeploySystem is Deploy {
         address systemConfigGlobalProxy = mustGetAddress("SystemConfigGlobalProxy");
         address systemConfigGlobal = mustGetAddress("SystemConfigGlobal");
 
+        string memory _json;
+        string memory _path = Config.deployConfigPath();
+        try vm.readFile(_path) returns (string memory data) {
+            _json = data;
+        } catch {
+            require(false, string.concat("Cannot find deploy config file at ", _path));
+        }
+        address systemConfigGlobalManager = stdJson.readAddress(_json, "$.systemConfigGlobalManager");
+
         _upgradeAndCallViaSafe({
             _proxy: payable(systemConfigGlobalProxy),
             _implementation: systemConfigGlobal,
-            _innerCallData: abi.encodeWithSelector(SystemConfigGlobal.initialize.selector, cfg.finalSystemOwner())
+            _innerCallData: abi.encodeCall(
+                SystemConfigGlobal.initialize,
+                (
+                    cfg.finalSystemOwner(),
+                    systemConfigGlobalManager
+                )
+            )
         });
 
         SystemConfigGlobal config = SystemConfigGlobal(systemConfigGlobalProxy);
