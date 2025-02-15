@@ -55,24 +55,18 @@ type ethClient struct {
 }
 
 func NewClient(client *ethclient.Client, metrics caching.Metrics) Client {
-	return newClient(client, metrics)
-}
-
-func newClient(client *ethclient.Client, metrics caching.Metrics) *ethClient {
-	cacheSize := 1000
 	return &ethClient{
 		client:        client,
-		blocksCache:   caching.NewLRUCache[common.Hash, *types.Block](metrics, "blocks", cacheSize),
-		headersCache:  caching.NewLRUCache[common.Hash, *types.Header](metrics, "headers", cacheSize),
-		receiptsCache: caching.NewLRUCache[common.Hash, types.Receipts](metrics, "receipts", cacheSize),
-		proofsCache:   caching.NewLRUCache[[common.AddressLength + common.HashLength]byte, *eth.AccountResult](metrics, "proofs", cacheSize),
+		blocksCache:   caching.NewLRUCache[common.Hash, *types.Block](metrics, "blocks", 1000),
+		headersCache:  caching.NewLRUCache[common.Hash, *types.Header](metrics, "headers", 1000),
+		receiptsCache: caching.NewLRUCache[common.Hash, types.Receipts](metrics, "receipts", 1000),
+		proofsCache:   caching.NewLRUCache[[common.AddressLength + common.HashLength]byte, *eth.AccountResult](metrics, "proofs", 1000),
 	}
 }
 
 func (e *ethClient) ChainConfig(ctx context.Context) (*params.ChainConfig, error) {
 	var config params.ChainConfig
-	err := e.client.Client().CallContext(ctx, &config, "debug_chainConfig")
-	if err != nil {
+	if err := e.client.Client().CallContext(ctx, &config, "debug_chainConfig"); err != nil {
 		return nil, err
 	}
 	return &config, nil
@@ -82,16 +76,22 @@ func (e *ethClient) BlockNumber(ctx context.Context) (uint64, error) {
 	return e.client.BlockNumber(ctx)
 }
 
-func (e *ethClient) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
-	if header, ok := e.headersCache.Get(hash); ok {
+func (e *ethClient) getHeader(ctx context.Context, fetchFunc func() (*types.Header, error), key common.Hash) (*types.Header, error) {
+	if header, ok := e.headersCache.Get(key); ok {
 		return header, nil
 	}
-	header, err := e.client.HeaderByHash(ctx, hash)
+	header, err := fetchFunc()
 	if err != nil {
 		return nil, err
 	}
-	e.headersCache.Add(hash, header)
+	e.headersCache.Add(key, header)
 	return header, nil
+}
+
+func (e *ethClient) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
+	return e.getHeader(ctx, func() (*types.Header, error) {
+		return e.client.HeaderByHash(ctx, hash)
+	}, hash)
 }
 
 func (e *ethClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error) {
@@ -103,8 +103,11 @@ func (e *ethClient) HeaderByNumber(ctx context.Context, number *big.Int) (*types
 	return header, nil
 }
 
-func (e *ethClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
-	block, err := e.client.BlockByNumber(ctx, number)
+func (e *ethClient) getBlock(ctx context.Context, fetchFunc func() (*types.Block, error), key common.Hash) (*types.Block, error) {
+	if block, ok := e.blocksCache.Get(key); ok {
+		return block, nil
+	}
+	block, err := fetchFunc()
 	if err != nil {
 		return nil, err
 	}
@@ -113,17 +116,16 @@ func (e *ethClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.
 	return block, nil
 }
 
+func (e *ethClient) BlockByNumber(ctx context.Context, number *big.Int) (*types.Block, error) {
+	return e.getBlock(ctx, func() (*types.Block, error) {
+		return e.client.BlockByNumber(ctx, number)
+	}, number.Bytes32())
+}
+
 func (e *ethClient) BlockByHash(ctx context.Context, hash common.Hash) (*types.Block, error) {
-	if block, ok := e.blocksCache.Get(hash); ok {
-		return block, nil
-	}
-	block, err := e.client.BlockByHash(ctx, hash)
-	if err != nil {
-		return nil, err
-	}
-	e.blocksCache.Add(block.Hash(), block)
-	e.headersCache.Add(block.Hash(), block.Header())
-	return block, nil
+	return e.getBlock(ctx, func() (*types.Block, error) {
+		return e.client.BlockByHash(ctx, hash)
+	}, hash)
 }
 
 func (e *ethClient) BlockReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
@@ -138,42 +140,7 @@ func (e *ethClient) BlockReceipts(ctx context.Context, hash common.Hash) (types.
 	return receipts, nil
 }
 
-func (e *ethClient) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
-	return e.client.CodeAt(ctx, contract, blockNumber)
-}
-
-func (e *ethClient) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
-	return e.client.CallContract(ctx, call, blockNumber)
-}
-
-func (e *ethClient) GetProof(ctx context.Context, address common.Address, hash common.Hash) (*eth.AccountResult, error) {
-	key := [common.AddressLength + common.HashLength]byte{}
-	copy(key[:common.AddressLength], address[:])
-	copy(key[common.AddressLength:], hash[:])
-	if proof, ok := e.proofsCache.Get(key); ok {
-		return proof, nil
-	}
-	var proof *eth.AccountResult
-	err := e.client.Client().CallContext(ctx, &proof, "eth_getProof", address, []common.Hash{}, hash)
-	if err != nil {
-		return nil, err
-	}
-	if proof == nil {
-		return nil, ethereum.NotFound
-	}
-	e.proofsCache.Add(key, proof)
-	return proof, nil
-}
-
-func (e *ethClient) ExecutionWitness(ctx context.Context, hash common.Hash) (*stateless.ExecutionWitness, error) {
-	var witness stateless.ExecutionWitness
-	err := e.client.Client().CallContext(ctx, &witness, "debug_executionWitness", hash)
-	return &witness, err
-}
-
-func (e *ethClient) Close() {
-	e.client.Close()
-}
+func (e *ethClient) Close() { e.client.Close() }
 
 type rollupClient struct {
 	client       *rpc.Client
@@ -181,17 +148,15 @@ type rollupClient struct {
 }
 
 func NewRollupClient(client *rpc.Client, metrics caching.Metrics) RollupClient {
-	cacheSize := 1000
 	return &rollupClient{
 		client:       client,
-		witnessCache: caching.NewLRUCache[common.Hash, []byte](metrics, "witnesses", cacheSize),
+		witnessCache: caching.NewLRUCache[common.Hash, []byte](metrics, "witnesses", 1000),
 	}
 }
 
 func (w *rollupClient) RollupConfig(ctx context.Context) (*rollup.Config, error) {
 	var config rollup.Config
-	err := w.client.CallContext(ctx, &config, "optimism_rollupConfig")
-	if err != nil {
+	if err := w.client.CallContext(ctx, &config, "optimism_rollupConfig"); err != nil {
 		return nil, err
 	}
 	return &config, nil
@@ -199,8 +164,7 @@ func (w *rollupClient) RollupConfig(ctx context.Context) (*rollup.Config, error)
 
 func (w *rollupClient) SyncStatus(ctx context.Context) (*eth.SyncStatus, error) {
 	var status eth.SyncStatus
-	err := w.client.CallContext(ctx, &status, "optimism_syncStatus")
-	if err != nil {
+	if err := w.client.CallContext(ctx, &status, "optimism_syncStatus"); err != nil {
 		return nil, err
 	}
 	return &status, nil
